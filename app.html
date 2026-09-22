@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MeetFair</title>
+<style>
+  :root { --bg:#f2f5f9; --card:#fff; --ink:#1f2733; --muted:#75808e; --blue:#2f6fb2; --green:#3d8a4f; --amber:#c98a1e; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:ui-sans-serif,system-ui,sans-serif; background:var(--bg); color:var(--ink); }
+  header { padding:20px 24px 8px; }
+  h1 { margin:0; font-size:1.5rem; }
+  .sub { color:var(--muted); margin:4px 0 0; font-size:.9rem; }
+  main { max-width:760px; margin:0 auto; padding:12px 16px 40px; }
+  form { background:var(--card); border-radius:12px; padding:14px; display:flex; gap:8px; flex-wrap:wrap; align-items:end; margin-bottom:14px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  label { font-size:.75rem; color:var(--muted); display:block; margin-bottom:3px; }
+  input, select, button { font:inherit; padding:8px 10px; border:1px solid #d3dae3; border-radius:8px; background:#fff; }
+  input[type=text] { width:150px; }
+  input[type=number] { width:76px; }
+  button { background:var(--blue); color:#fff; border:none; cursor:pointer; }
+  button.ghost { background:#e8edf3; color:var(--ink); }
+  .people { display:flex; gap:8px; flex-wrap:wrap; margin-bottom:16px; }
+  .chip { background:var(--card); border-radius:999px; padding:6px 12px; font-size:.85rem; box-shadow:0 1px 3px rgba(0,0,0,.07); display:flex; gap:8px; align-items:center; }
+  .chip button { background:none; color:#b0b8c2; padding:0 2px; font-size:1rem; }
+  .slot { background:var(--card); border-radius:12px; padding:12px 16px; margin-bottom:10px; box-shadow:0 1px 4px rgba(0,0,0,.06); }
+  .slot .row { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+  .utc { font-weight:700; font-size:1.05rem; }
+  .locals { color:var(--muted); font-size:.88rem; margin-top:4px; }
+  .badge { font-size:.75rem; font-weight:700; padding:3px 10px; border-radius:999px; }
+  .b-great { background:#e0f0e2; color:#2e6b2e; }
+  .b-ok { background:#fbf0da; color:#9a6b12; }
+  .b-pain { background:#fae2e1; color:#b23834; }
+  .best-tag { color:var(--green); font-weight:700; font-size:.8rem; margin-left:8px; }
+  .none { background:var(--card); border-radius:12px; padding:24px; text-align:center; color:var(--muted); }
+  h2 { font-size:.85rem; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:18px 0 8px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>MeetFair</h1>
+  <p class="sub">Fair meeting times across timezones. Everyone says when they're actually available; the app finds the hours where nobody pays too much.</p>
+</header>
+<main>
+  <form id="add-form">
+    <div><label>Name</label><input type="text" id="f-name" placeholder="Name" required maxlength="24"></div>
+    <div><label>UTC offset</label><input type="number" id="f-off" step="0.5" min="-12" max="14" value="0" required></div>
+    <div><label>Earliest (local)</label><input type="number" id="f-early" min="0" max="23" value="8" required></div>
+    <div><label>Latest (local)</label><input type="number" id="f-late" min="1" max="24" value="22" required></div>
+    <button type="submit">Add person</button>
+  </form>
+  <div class="people" id="people"></div>
+  <div id="results"></div>
+</main>
+<script src="engine.js"></script>
+<script>
+(function () {
+  var KEY = 'meetfair-v1';
+  function load() { try { return JSON.parse(localStorage.getItem(KEY)) || []; } catch (e) { return []; } }
+  function save() { localStorage.setItem(KEY, JSON.stringify(people)); }
+  var people = load();
+
+  function el(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text !== undefined) e.textContent = text;
+    return e;
+  }
+  function fmtOff(o) { return 'UTC' + (o >= 0 ? '+' : '') + o; }
+  function fmtHour(h) {
+    var hh = Math.floor(h), mm = Math.round((h - hh) * 60);
+    return String(hh).padStart(2, '0') + ':' + String(mm).padStart(2, '0');
+  }
+
+  function render() {
+    var pw = document.getElementById('people');
+    pw.innerHTML = '';
+    people.forEach(function (p, idx) {
+      var c = el('div', 'chip');
+      c.appendChild(el('span', null, p.name + ' ' + fmtOff(p.offset) + ' (' + fmtHour(p.earliest) + '-' + fmtHour(p.latest) + ')'));
+      var x = el('button', null, 'x');
+      x.onclick = function () { people.splice(idx, 1); save(); render(); };
+      c.appendChild(x);
+      pw.appendChild(c);
+    });
+    var res = document.getElementById('results');
+    res.innerHTML = '';
+    if (!people.length) {
+      res.innerHTML = '<div class="none">Add the people on the call - name, timezone, and the local hours they will actually take a meeting.</div>';
+      return;
+    }
+    var slots = MeetFair.bestSlots(people);
+    res.appendChild(el('h2', null, slots.length ? 'Workable slots (fairest first)' : 'No workable slot'));
+    if (!slots.length) {
+      res.appendChild(el('div', 'none', 'No UTC hour fits everyone\'s window. Widen somebody\'s hours or split the meeting.'));
+      return;
+    }
+    slots.slice(0, 8).forEach(function (s, i) {
+      var card = el('div', 'slot');
+      var row = el('div', 'row');
+      var left = el('div');
+      var u = el('span', 'utc', fmtHour(s.utc) + ' UTC');
+      left.appendChild(u);
+      if (i === 0) left.appendChild(el('span', 'best-tag', 'FAIREST'));
+      row.appendChild(left);
+      var badge = s.pain === 0 ? ['everyone in work hours', 'b-great'] : s.pain <= 3 ? ['mild stretch', 'b-ok'] : ['someone pays', 'b-pain'];
+      row.appendChild(el('span', 'badge ' + badge[1], badge[0]));
+      card.appendChild(row);
+      var locals = people.map(function (p, j) { return p.name + ' ' + fmtHour(s.locals[j]); }).join(' - ');
+      card.appendChild(el('div', 'locals', locals));
+      res.appendChild(card);
+    });
+  }
+
+  document.getElementById('add-form').onsubmit = function (e) {
+    e.preventDefault();
+    try {
+      people.push(MeetFair.makeParticipant(
+        document.getElementById('f-name').value,
+        document.getElementById('f-off').value,
+        document.getElementById('f-early').value,
+        document.getElementById('f-late').value));
+    } catch (err) { alert(err.message); return; }
+    document.getElementById('f-name').value = '';
+    save(); render();
+  };
+  render();
+})();
+</script>
+</body>
+</html>
